@@ -4,6 +4,10 @@
 # Ignore all test/sandbox projects (marked with .test)
 /*.test
 
+# Ignore lockfiles (.lock*) in the project subdirs
+/*/.lock*
+
 # Ignore everythin in the build/ directories but the final .pbw (pebble executables)
 /*/build/*
+/*/build/.*
 !/*/build/*.pbw
