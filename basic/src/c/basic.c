@@ -1,0 +1,195 @@
+#include <pebble.h>
+
+// Basic
+// -----
+// A simpe watchface for Pebble watch (specifically for Pebble Steel, not tested on anything else)
+// Based on different examples and tutorials
+// tivasyk <tivasyk@gmail.com>
+// Done:
+// [+] Time
+// [+] Date (Day XX Mon)
+// [+] Battery % (upper right corner)
+// Todo:
+// [ ] Fix battery % (won't update properly)
+// [ ] Battery graphics (line)
+// [ ] Battery meter like |||| instead of (ugly) 100%
+// [ ] Switching between different battery meters with a #define in code (for now)
+// [ ] Use system fonts for everything but the main time layer (smaller memory footprint)
+
+// Розміри екранів для різних моделей Pebbble
+// Pebbble              144x168 px      Monochrome
+// Pebble Steel         144x168 px      Monochrome
+// Pebble Time          144x168 px      64 colors
+// Pebble Time Steel    144x168 px      64 colors
+
+// Для простоти пошуку в коді — псевдоними для назв ресурсів та загальні «налаштування» часу компіляції
+// Для Завантаження сторонніх шрифтів потрібно додати їх до package.json -- і вже тоді активувати тут !
+// #define DATE_FONT   RESOURCE_ID_FONT_CUSTOM_48
+// #define SMALL_FONT  RESOURCE_ID_FONT_MONTREAL_14
+// #define TIME_FONT   RESOURCE_ID_FONT_MONTREAL_48
+// #define TIME_FONT   FONT_KEY_ROBOTO_BOLD_SUBSET_49
+#define TIME_FONT   RESOURCE_ID_FONT_CUSTOM_48
+#define DATE_FONT   FONT_KEY_GOTHIC_24_BOLD
+#define SMALL_FONT  FONT_KEY_GOTHIC_14
+// Кольори тексту та тла (поміняти місцями значення, щоби інвертувати)
+#define TEXT_COLOR  GColorClear
+#define BACK_COLOR  GColorBlack
+#define PADDING     10
+// Висота та відступ згори для текстового шару батареї
+#define BATT_H      16
+#define BATT_Y      10
+// Тип індикатора заряду батареї:
+// BATT_PERCENTAGE  0       // 100%
+// BATT_STICKS      1       // ||||||||||
+// BATT_LINE        2       // ----------
+#define BATT_GAUGE  BATT_PERCENTAGE
+// Висота та відступ згори для текстового шару часу
+#define TIME_H      50
+#define TIME_Y      50
+// Висота та відступ згори для шару дати
+#define DATE_H      26
+#define DATE_Y      TIME_Y + TIME_H
+
+// Формат часу: %H:%M (23:59) або %I:%M (12:59)
+// Формат дати: ? (Sat 24 Nov)
+
+// Global declarations
+static Window *s_main_window;
+static TextLayer *s_time_layer;
+static TextLayer *s_battery_layer;
+static TextLayer *s_date_layer;
+// Шрифти для відображення елементів інтерфейсу
+static GFont s_time_font;               // Великий шрифт (для відображення часу) буде тут
+static GFont s_date_font;               // Середній шрифт (дата) буде тут
+static GFont s_small_font;              // Дрібний шрифт (стан батареї тощо) буде тут
+// Текстові буфери для виводу на екран (повинні бути static щоби забезпечити час на вивід)
+static char t_buffer[] = "00:00";         // Час
+static char b_buffer[] = "100%";          // Заряд батареї як відсоток
+// static char b_buffer[] = "||||||||||"  // Заряд батареї як індикатор
+static char d_buffer[] = "Mon 31 Jan";    // Дата
+
+// Поновлення часу — програма викликає цю процедуру щоразу, коли змінюється час
+// (див. tick_handler())
+static void update_time() {
+    // Get a tm structure with the current time data
+    time_t temp = time(NULL);
+    struct tm *tick_time = localtime(&temp);
+    
+    // Write the current hours and minutes into a buffer
+    strftime(t_buffer, sizeof(t_buffer), clock_is_24h_style() ? "%H:%M" : "%I:%M", tick_time);
+    strftime(d_buffer, sizeof(d_buffer), "%a %d %b", tick_time);
+    // Display this time on the s_time_layer
+    text_layer_set_text(s_time_layer, t_buffer);
+    text_layer_set_text(s_date_layer, d_buffer);
+    // Не певен, чи варто поновлювати інф. про батарею щоразу коли поновлюється час
+    // text_layer_set_text(s_battery_layer, b_buffer);
+}
+
+static void main_window_load(Window *window) {
+    // Get information about the window
+    Layer *window_layer = window_get_root_layer(window);
+    GRect bounds = layer_get_bounds(window_layer);
+    
+    // Load custom fonts
+    //s_time_font = fonts_get_system_font(TIME_FONT);
+    s_time_font = fonts_load_custom_font(resource_get_handle(TIME_FONT));
+    s_date_font = fonts_get_system_font(DATE_FONT);
+    s_small_font = fonts_get_system_font(SMALL_FONT);
+    
+    // Текстовий шар для часу (00:00)
+    // Великий шрифт, центрування без відступів по горизонталі
+    s_time_layer = text_layer_create(GRect(0, PBL_IF_ROUND_ELSE(TIME_Y+6, TIME_Y), bounds.size.w, TIME_H));
+    // Параметри шару: кольори, шрифт, вирівнювання
+    text_layer_set_background_color(s_time_layer, BACK_COLOR);
+    text_layer_set_text_color(s_time_layer, TEXT_COLOR);
+    text_layer_set_font(s_time_layer, s_time_font);
+    text_layer_set_text_alignment(s_time_layer, GTextAlignmentCenter);
+    // Add it as a child layer to the window's root layer
+    layer_add_child(window_layer, text_layer_get_layer(s_time_layer));
+        
+    // Текстовий шар для дати
+    s_date_layer = text_layer_create(GRect(PADDING, PBL_IF_ROUND_ELSE(DATE_Y+6, DATE_Y), bounds.size.w - 2*PADDING, DATE_H));
+    text_layer_set_background_color(s_date_layer, BACK_COLOR);
+    text_layer_set_text_color(s_date_layer, TEXT_COLOR);
+    text_layer_set_font(s_date_layer, s_date_font);
+    text_layer_set_text_alignment(s_date_layer, PBL_IF_ROUND_ELSE(GTextAlignmentCenter, GTextAlignmentRight));
+    // Зареєструвати шар як нащадка основного шару вікна
+    layer_add_child(window_layer, text_layer_get_layer(s_date_layer));
+    
+    // Текстовий шар для інформації про заряд батареї (000%)
+    // Дрібний шрифт, цитрування для круглих дисплеїв або виключення праворуч для прямокутних, з відступами по горизонталі
+    s_battery_layer = text_layer_create(GRect(PADDING, PBL_IF_ROUND_ELSE(BATT_Y+6, BATT_Y), bounds.size.w - 2*PADDING, BATT_H));
+    // Параметри шару: кольори, шрифт, вирівнювання
+    text_layer_set_background_color(s_battery_layer, BACK_COLOR);
+    text_layer_set_text_color(s_battery_layer, TEXT_COLOR);
+    text_layer_set_font(s_battery_layer, s_small_font);
+    text_layer_set_text_alignment(s_battery_layer, PBL_IF_ROUND_ELSE(GTextAlignmentCenter, GTextAlignmentRight));
+    // Зареєструвати шар як нащадка основного шару вікна
+    layer_add_child(window_layer, text_layer_get_layer(s_battery_layer));
+}
+
+static void main_window_unload(Window *window) {
+    // Звільнити пам'ять, зайняту текстовими шарами
+    text_layer_destroy(s_time_layer);
+    text_layer_destroy(s_battery_layer);
+    text_layer_destroy(s_date_layer);
+    
+    // Звільнити пам'ять, зайняту завантаженими шрифтами
+    fonts_unload_custom_font(s_time_font);
+    // fonts_unload_custom_font(s_date_font);
+    // fonts_unload_custom_font(s_small_font);
+}
+
+static void battery_handler(BatteryChargeState charge_state) {
+    // Формуємо текстовий рядок про стан батареї в буфері b_buffer
+    // та виводимо буфер у текстовий шар s_battery_layer
+    snprintf(b_buffer, sizeof(b_buffer), "%d%%", charge_state.charge_percent);
+    // Індикатор батареї у вигляді «паличок»:
+    // battery_sticks = charge_state.charge_percent % 10
+    // b_buffer = ???
+    text_layer_set_text(s_battery_layer, b_buffer);
+}
+
+// Реєстрація процедури update_time() для виклику щоразу, коли змінюється час
+static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
+    update_time();
+}
+
+static void init() {
+    // Create main Window element and assign to a pointer
+    s_main_window = window_create();
+    
+    // Встановити колір тла для всього екрану
+    window_set_background_color(s_main_window, BACK_COLOR);
+    
+    // Set handlers to manage the elements inside the window
+    window_set_window_handlers(s_main_window, (WindowHandlers) {
+        .load = main_window_load,
+        .unload = main_window_unload
+    });
+    
+    // Зареєструвати процедуру обробки зміни часу (щохвилини)
+    // та обробника інформації про батарею
+    tick_timer_service_subscribe(MINUTE_UNIT, tick_handler);
+    battery_state_service_subscribe(battery_handler);
+    
+    // Show the window on the watch, try with animated=true
+    window_stack_push(s_main_window, true);
+    update_time();
+    battery_handler(battery_state_service_peek());
+}
+
+static void deinit() {
+    // Destroy the window to free memory
+    window_destroy(s_main_window);
+    
+    // Скасувати ресєтрацію процедури оброки зміни часу
+    tick_timer_service_unsubscribe();
+    battery_state_service_unsubscribe();
+}
+
+int main(void) {
+    init();
+    app_event_loop();
+    deinit();
+}
